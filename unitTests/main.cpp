@@ -805,7 +805,7 @@ TEST_F(UnitManipulators, compound_unit)
 {
 	using acceleration1 = unit<std::ratio<1>, category::acceleration_unit>;
 	using acceleration2 = compound_unit<meters, inverse<seconds>, inverse<seconds>>;
-	using acceleration3 = unit<std::ratio<1>, base_unit<std::ratio<1>, std::ratio<0>, std::ratio<-2>>>;
+	using acceleration3 = unit<std::ratio<1>, base_unit<units::d::length, std::ratio<1>, units::d::time, std::ratio<-2>>>;
 	using acceleration4 = compound_unit<meters, inverse<squared<seconds>>>;
 	using acceleration5 = compound_unit<meters, squared<inverse<seconds>>>;
 
