@@ -334,6 +334,29 @@
 	UNIT_ADD(namespaceName, tera ## nameSingular, tera ## namePlural, T ## abbreviation, tera<namePlural>)\
 	UNIT_ADD(namespaceName, peta ## nameSingular, peta ## namePlural, P ## abbreviation, peta<namePlural>)
 
+/**
+ * @def			UNIT_ADD_BASE_DIMENSION(namespaceName, uniqueId, dimensionName, dimensionSymbol)
+ * @brief		Helper macro for generating the boiler-plate code generating a new base dimension.
+ * @details		The macro generates a base dimension type declaration.
+ * @param		namespaceName - namespace in which the new base dimension will be declared.
+ * @param		uniqueId - unique integer ID which controls the sorting order of base dimensions.
+ * @param		dimensionName - name of the physical dimension, e.g. 'length'
+ * @param		dimensionSymbol - string symbol for the physical dimension, e.g. "L"
+ * @note        A canonical ordering is a necessary compromise for sparse, extensible dimension lists.
+ *              If a future C++ spec provides a compile-time function similar to std::type_info::before,
+ *              the "uniqueId" value may become unnecessary.
+ */
+#define UNIT_ADD_BASE_DIMENSION(namespaceName, uniqueId, dimensionName, dimensionSymbol) \
+	namespace namespaceName \
+	{\
+		struct dimensionName : public units::detail::_base_dimension \
+		{\
+			static const int unique_id = (uniqueId); \
+			static const char* name() {return #dimensionName;} \
+			static const char* symbol() {return #dimensionSymbol;} \
+		};\
+	}
+
 //--------------------
 //	UNITS NAMESPACE
 //--------------------
@@ -551,6 +574,96 @@ namespace units
 		};
 		/** @endcond */	// END DOXYGEN IGNORE
 	}
+	
+	/** @cond */	// DOXYGEN IGNORE
+	namespace detail
+	{
+		/**
+		 * @brief		helper type to identify base dimensions.
+		 * @details		A base class for base dimensions which enables RTTI testing.
+		 */
+		struct _base_dimension_t {};
+	}
+	/** @endcond */	// END DOXYGEN IGNORE
+
+	namespace traits
+	{
+		/**
+		 * @ingroup		TypeTraits
+		 * @brief		Trait which tests if a class is a base dimension type.
+		 * @details		Inherits from `std::true_type` or `std::false_type`. Use `is_base_dimension<T>::value` to test
+		 *				whether `class T` implements a base dimension.
+		 */
+		template<class T>
+		struct is_base_dimension : std::is_base_of<units::detail::_base_dimension_t, T> {};
+		
+		/**
+		 * @ingroup		TypeTraits
+		 * @brief		Trait which tests if two base dimensions are the same, and raises an error if their IDs collide.
+		 * @details		Inherits from `std::true_type` or `std::false_type`. Use `base_dimension_same<D1, D2>::value` to test
+		 *				whether the base dimensions are the same.
+		 */
+		template<class D1, class D2>
+		struct base_dimension_same : std::is_same<D1, D2>
+		{
+			static_assert((D1::unique_id == D2::unique_id) == std::is_same<D1, D2>::value,
+				"Two different base dimensions are using the same unique_id.");
+		};
+
+		/**
+		 * @ingroup		TypeTraits
+		 * @brief		Trait which tests if one base dimension is ordered before another.
+		 * @details		Inherits from `std::true_type` or `std::false_type`. Use `base_dimension_same<D1, D2>::value` to test
+		 *				whether the D1 should appear before D2 in dimension lists.
+		 */
+		template<class D1, class D2>
+		struct base_dimension_before : std::integral_constant<bool, (D1::unique_id < D2::unique_id)> {}
+		
+		/**
+		 * @ingroup		TypeTraits
+		 * @brief		Trait which tests if one base dimension is ordered after another.
+		 * @details		Inherits from `std::true_type` or `std::false_type`. Use `base_dimension_same<D1, D2>::value` to test
+		 *				whether the D1 should appear after D2 in dimension lists.
+		 */
+		template<class D1, class D2>
+		struct base_dimension_after : std::integral_constant<bool, (D1::unique_id > D2::unique_id)> {}
+		
+		/**
+		 * @ingroup		TypeTraits
+		 * @brief		Trait which tests if a list of base dimensions (with exponents) is ordered.
+		 * @details		Inherits from `std::true_type` or `std::false_type`. Use `dimensions_ordered<Base, Exp, ...>::value` to test
+		 *				whether the dimension list is properly ordered by unique_id.
+		 */
+		template<class... Dims>
+		struct dimensions_ordered : public std::integral_constant<bool, true> {};
+
+		template<class Base1, class Exp1, class Base2, class Exp2, class... Dims>
+		struct dimensions_ordered<Base1, Exp1, Base2, Exp2, Dims...> :
+			public std::integral_constant<bool,
+				base_dimension_before<Base1, Base2>::value &&
+				dimensions_ordered<Base2, Exp2, Dims...>::value> {};
+		
+		/**
+		 * @ingroup		TypeTraits
+		 * @brief		Trait which tests if the exponents in a dimension list are valid.
+		 * @details		Inherits from `std::true_type` or `std::false_type`.
+		 *              Use `dimensions_valid_exponents<Base, Exp, ...>::value` to check exponent validity.
+		 *              Dimension lists which do not follow each dimension with a nonzero std::ratio are invalid.
+		 */
+		template<class... Dims>
+		struct dimensions_valid_exponents {};
+		
+		template<>
+		struct dimensions_valid_exponents<> : public std::integral_constant<bool, true> {};
+
+		template<class Base1>
+		struct dimensions_valid_exponents<Base1> : public std::integral_constant<bool, false> {};
+
+		template<class Base1, class Exp1, class... Dims>
+		struct dimensions_valid_exponents<Base1, Exp1, Dims...> :
+			public std::integral_constant<bool,
+				traits::is_ratio<Meter>::value && (Exp1::num != 0) && dimensions_valid_exponents<Dims...>::value> {};
+	}
 
 	/** @cond */	// DOXYGEN IGNORE
 	namespace detail
@@ -599,7 +712,27 @@ namespace units
 	}
 
 	/** @} */ // end of TypeTraits
+}
 
+	//------------------------------
+	//	BASE DIMENSION TYPES
+	//------------------------------
+
+	// SI standard base physical dimensions
+	UNIT_ADD_BASE_DIMENSION(units, 100, length,             "L");
+	UNIT_ADD_BASE_DIMENSION(units, 200, mass,               "M");
+	UNIT_ADD_BASE_DIMENSION(units, 300, time,               "T");
+	UNIT_ADD_BASE_DIMENSION(units, 400, current,            "I");
+	UNIT_ADD_BASE_DIMENSION(units, 500, temperature,        "K"); // SI symbol is uppercase Theta...
+	UNIT_ADD_BASE_DIMENSION(units, 600, substance,          "N");
+	UNIT_ADD_BASE_DIMENSION(units, 700, luminous_intensity, "J");
+
+	// Useful non-SI base dimensions
+	UNIT_ADD_BASE_DIMENSION(units, 10100, angle,      "Rad");
+	UNIT_ADD_BASE_DIMENSION(units, 10200, dataLength, "Bit");
+
+namespace units
+{
 	//------------------------------
 	//	BASE UNIT CLASS
 	//------------------------------
@@ -610,35 +743,21 @@ namespace units
 	 * @details		Base units are represented by a combination of `std::ratio` template parameters, each
 	 *				describing the exponent of the type of unit they represent. Example: meters per second
 	 *				would be described by a +1 exponent for meters, and a -1 exponent for seconds, thus:
-	 *				`base_unit<std::ratio<1>, std::ratio<0>, std::ratio<-1>>`
-	 * @tparam		Meter		`std::ratio` representing the exponent value for meters.
-	 * @tparam		Kilogram	`std::ratio` representing the exponent value for kilograms.
-	 * @tparam		Second		`std::ratio` representing the exponent value for seconds.
-	 * @tparam		Radian		`std::ratio` representing the exponent value for radians. Although radians are not SI base units, they are included because radians are described by the SI as m * m^-1, which would make them indistinguishable from scalars.
-	 * @tparam		Ampere		`std::ratio` representing the exponent value for amperes.
-	 * @tparam		Kelvin		`std::ratio` representing the exponent value for Kelvin.
-	 * @tparam		Mole		`std::ratio` representing the exponent value for moles.
-	 * @tparam		Candela		`std::ratio` representing the exponent value for candelas.
+	 * @details		Base units are represented by a combination of paired template parameters, each
+	 *              of which is comprised of a base dimension followed by a `std::ratio` describing the
+	 *              degree of that base dimension in the unit.  Example: meters per second would be
+	 *				described by a +1 exponent for meters, and a -1 exponent for seconds, thus:
+	 *				`base_unit<units::length, std::ratio<1>, units::time, std::ratio<-1>>`
+	 * @tparam		Dimensions	A dimension list comprised of alternating dimension types and std::ratio exponents.
 	 * @sa			category	 for type aliases for SI base_unit types.
 	 */
-	template<class Meter = std::ratio<0>,
-	class Kilogram = std::ratio<0>,
-	class Second = std::ratio<0>,
-	class Radian = std::ratio<0>,
-	class Ampere = std::ratio<0>,
-	class Kelvin = std::ratio<0>,
-	class Mole = std::ratio<0>,
-	class Candela = std::ratio < 0 >>
+	template<class... Dimensions>
 	struct base_unit : units::detail::_base_unit_t
 	{
-		static_assert(traits::is_ratio<Meter>::value, "Template parameter `Meter` must be a `std::ratio` representing the exponent of meters the unit has");
-		static_assert(traits::is_ratio<Kilogram>::value, "Template parameter `Kilogram` must be a `std::ratio` representing the exponent of kilograms the unit has");
-		static_assert(traits::is_ratio<Second>::value, "Template parameter `Second` must be a `std::ratio` representing the exponent of seconds the unit has");
-		static_assert(traits::is_ratio<Ampere>::value, "Template parameter `Ampere` must be a `std::ratio` representing the exponent of amperes the unit has");
-		static_assert(traits::is_ratio<Kelvin>::value, "Template parameter `Kelvin` must be a `std::ratio` representing the exponent of kelvin the unit has");
-		static_assert(traits::is_ratio<Candela>::value, "Template parameter `Candela` must be a `std::ratio` representing the exponent of candelas the unit has");
-		static_assert(traits::is_ratio<Mole>::value, "Template parameter `Mole` must be a `std::ratio` representing the exponent of moles the unit has");
-		static_assert(traits::is_ratio<Radian>::value, "Template parameter `Radian` must be a `std::ratio` representing the exponent of radians the unit has");
+		static_assert(traits::dimensions_ordered<Dimensions...>::value,
+			"Template parameter dimensions must be declared in order of their unique_id.");
+		static_assert(traits::dimensions_valid_exponents<Dimensions...>::value,
+			"Template parameter dimensions must be followed by non-zero `std::ratio` exponents representing the exponent of that dimension.");
 	};
 
 	//------------------------------
@@ -655,47 +774,71 @@ namespace units
 		typedef base_unit<> scalar_unit;			///< Represents a quantity with no dimension.
 		typedef base_unit<> dimensionless_unit;	///< Represents a quantity with no dimension.
 
-		// SI BASE UNIT TYPES
-		//					METERS			KILOGRAMS		SECONDS			RADIANS			AMPERES			KELVIN			MOLE			CANDELA		---		CATEGORY
-		typedef base_unit<std::ratio<1>>																														length_unit;			 		///< Represents an SI base unit of length
-		typedef base_unit<std::ratio<0>,	std::ratio<1>>																										mass_unit;				 		///< Represents an SI base unit of mass
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<1>>																						time_unit;				 		///< Represents an SI base unit of time
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<1>>																		angle_unit;				 		///< Represents an SI base unit of angle
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<1>>														current_unit;			 		///< Represents an SI base unit of current
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<1>>										temperature_unit;		 		///< Represents an SI base unit of temperature
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<1>>						substance_unit;			 		///< Represents an SI base unit of amount of substance
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<1>>		luminous_intensity_unit; 		///< Represents an SI base unit of luminous intensity
+		// SI PHYSICAL BASE UNIT TYPES
+		typedef base_unit<length,             std::ratio<1>> length_unit;             ///< Represents an SI base unit of length
+		typedef base_unit<mass,               std::ratio<1>> mass_unit;               ///< Represents an SI base unit of mass
+		typedef base_unit<time,               std::ratio<1>> time_unit;               ///< Represents an SI base unit of time
+		typedef base_unit<current,            std::ratio<1>> current_unit;            ///< Represents an SI base unit of current
+		typedef base_unit<temperature,        std::ratio<1>> temperature_unit;        ///< Represents an SI base unit of temperature
+		typedef base_unit<substance,          std::ratio<1>> substance_unit;          ///< Represents an SI base unit of amount of substance
+		typedef base_unit<luminous_intensity, std::ratio<1>> luminous_intensity_unit; ///< Represents an SI base unit of luminous intensity
+		
+		// SI NON-PHYSICAL BASE UNIT TYPES
+		typedef base_unit<angle,              std::ratio<1>> angle_unit;              ///< Represents an SI base unit of angle
 
 		// SI DERIVED UNIT TYPES
-		//					METERS			KILOGRAMS		SECONDS			RADIANS			AMPERES			KELVIN			MOLE			CANDELA		---		CATEGORY	
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<2>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>>		solid_angle_unit;				///< Represents an SI derived unit of solid angle
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<-1>>																						frequency_unit;					///< Represents an SI derived unit of frequency
-		typedef base_unit<std::ratio<1>,	std::ratio<0>,	std::ratio<-1>>																						velocity_unit;					///< Represents an SI derived unit of velocity
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<-1>,	std::ratio<1>>																		angular_velocity_unit;			///< Represents an SI derived unit of angular velocity
-		typedef base_unit<std::ratio<1>,	std::ratio<0>,	std::ratio<-2>>																						acceleration_unit;				///< Represents an SI derived unit of acceleration
-		typedef base_unit<std::ratio<1>,	std::ratio<1>,	std::ratio<-2>>																						force_unit;						///< Represents an SI derived unit of force
-		typedef base_unit<std::ratio<-1>,	std::ratio<1>,	std::ratio<-2>>																						pressure_unit;					///< Represents an SI derived unit of pressure
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<1>,	std::ratio<0>,	std::ratio<1>>														charge_unit;					///< Represents an SI derived unit of charge
-		typedef base_unit<std::ratio<2>,	std::ratio<1>,	std::ratio<-2>>																						energy_unit;					///< Represents an SI derived unit of energy
-		typedef base_unit<std::ratio<2>,	std::ratio<1>,	std::ratio<-3>>																						power_unit;						///< Represents an SI derived unit of power
-		typedef base_unit<std::ratio<2>,	std::ratio<1>,	std::ratio<-3>,	std::ratio<0>,	std::ratio<-1>>														voltage_unit;					///< Represents an SI derived unit of voltage
-		typedef base_unit<std::ratio<-2>,	std::ratio<-1>,	std::ratio<4>,	std::ratio<0>,	std::ratio<2>>														capacitance_unit;				///< Represents an SI derived unit of capacitance
-		typedef base_unit<std::ratio<2>,	std::ratio<1>,	std::ratio<-3>,	std::ratio<0>,	std::ratio<-2>>														impedance_unit;					///< Represents an SI derived unit of impedance
-		typedef base_unit<std::ratio<-2>,	std::ratio<-1>,	std::ratio<3>,	std::ratio<0>,	std::ratio<2>>														conductance_unit;				///< Represents an SI derived unit of conductance
-		typedef base_unit<std::ratio<2>,	std::ratio<1>,	std::ratio<-2>,	std::ratio<0>,	std::ratio<-1>>														magnetic_flux_unit;				///< Represents an SI derived unit of magnetic flux
-		typedef base_unit<std::ratio<0>,	std::ratio<1>,	std::ratio<-2>,	std::ratio<0>,	std::ratio<-1>>														magnetic_field_strength_unit;	///< Represents an SI derived unit of magnetic field strength
-		typedef base_unit<std::ratio<2>,	std::ratio<1>,	std::ratio<-2>,	std::ratio<0>,	std::ratio<-2>>														inductance_unit;				///< Represents an SI derived unit of inductance
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<2>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<1>>		luminous_flux_unit;				///< Represents an SI derived unit of luminous flux
-		typedef base_unit<std::ratio<-2>,	std::ratio<0>,	std::ratio<0>,	std::ratio<2>,	std::ratio<0>,	std::ratio<0>,	std::ratio<0>,	std::ratio<1>>		illuminance_unit;				///< Represents an SI derived unit of illuminance
-		typedef base_unit<std::ratio<0>,	std::ratio<0>,	std::ratio<-1>>																						radioactivity_unit;				///< Represents an SI derived unit of radioactivity
+		typedef base_unit<angle,  std::ratio< 2>>
+			solid_angle_unit;             ///< Represents an SI derived unit of solid angle
+		typedef base_unit<time,   std::ratio<-1>>
+			frequency_unit;               ///< Represents an SI derived unit of frequency
+		typedef base_unit<length, std::ratio< 1>, time,    std::ratio<-1>>
+			velocity_unit;                ///< Represents an SI derived unit of velocity
+		typedef base_unit<time,   std::ratio<-1>, angle,   std::ratio< 1>>
+			angular_velocity_unit;        ///< Represents an SI derived unit of angular velocity
+		typedef base_unit<length, std::ratio< 1>, time,    std::ratio<-2>>
+			acceleration_unit;            ///< Represents an SI derived unit of acceleration
+		typedef base_unit<length, std::ratio< 1>, mass,    std::ratio< 1>, time,    std::ratio<-2>>
+			force_unit;                   ///< Represents an SI derived unit of force
+		typedef base_unit<length, std::ratio<-1>, mass,    std::ratio< 1>, time,    std::ratio<-2>>
+			pressure_unit;                ///< Represents an SI derived unit of pressure
+		typedef base_unit<time,   std::ratio< 1>, current, std::ratio< 1>>
+			charge_unit;                  ///< Represents an SI derived unit of charge
+		typedef base_unit<length, std::ratio< 2>, mass,    std::ratio< 1>, time,    std::ratio<-2>>
+			energy_unit;                  ///< Represents an SI derived unit of energy
+		typedef base_unit<length, std::ratio< 2>, mass,    std::ratio< 1>, time,    std::ratio<-3>>
+			power_unit;                   ///< Represents an SI derived unit of power
+		typedef base_unit<length, std::ratio< 2>, mass,    std::ratio< 1>, time,    std::ratio<-3>, current, std::ratio<-1>>
+			voltage_unit;                 ///< Represents an SI derived unit of voltage
+		typedef base_unit<length, std::ratio<-2>, mass,    std::ratio<-1>, time,    std::ratio< 4>, current, std::ratio< 2>>
+			capacitance_unit;             ///< Represents an SI derived unit of capacitance
+		typedef base_unit<length, std::ratio< 2>, mass,    std::ratio< 1>, time,    std::ratio<-3>, current, std::ratio<-2>>
+			impedance_unit;               ///< Represents an SI derived unit of impedance
+		typedef base_unit<length, std::ratio<-2>, mass,    std::ratio<-1>, time,    std::ratio< 3>, current, std::ratio< 2>>
+			conductance_unit;             ///< Represents an SI derived unit of conductance
+		typedef base_unit<length, std::ratio< 2>, mass,    std::ratio< 1>, time,    std::ratio<-2>, current, std::ratio<-1>>
+			magnetic_flux_unit;           ///< Represents an SI derived unit of magnetic flux
+		typedef base_unit<mass,   std::ratio< 1>, time,    std::ratio<-2>, current, std::ratio<-1>>
+			magnetic_field_strength_unit; ///< Represents an SI derived unit of magnetic field strength
+		typedef base_unit<length, std::ratio< 2>, mass,    std::ratio< 1>, time,    std::ratio<-2>, current, std::ratio<-2>>
+			inductance_unit;              ///< Represents an SI derived unit of inductance
+		typedef base_unit<angle,  std::ratio< 2>,                       luminous_intensity, std::ratio<1>>
+			luminous_flux_unit;           ///< Represents an SI derived unit of luminous flux
+		typedef base_unit<length, std::ratio<-2>, angle, std::ratio<2>, luminous_intensity, std::ratio<1>>
+			illuminance_unit;             ///< Represents an SI derived unit of illuminance
+		typedef base_unit<time,   std::ratio<-1>>
+			radioactivity_unit;           ///< Represents an SI derived unit of radioactivity
 
 		// OTHER UNIT TYPES
-		//				METERS			KILOGRAMS		SECONDS			RADIANS			AMPERES			KELVIN			MOLE			CANDELA			---		CATEGORY			
-		typedef base_unit<std::ratio<2>,	std::ratio<1>,	std::ratio<-2>>																						torque_unit;					///< Represents an SI derived unit of torque
-		typedef base_unit<std::ratio<2>>																														area_unit;						///< Represents an SI derived unit of area
-		typedef base_unit<std::ratio<3>>																														volume_unit;					///< Represents an SI derived unit of volume
-		typedef base_unit<std::ratio<-3>,	std::ratio<1>>																										density_unit;					///< Represents an SI derived unit of density
-		typedef base_unit<>																																		concentration_unit;				///< Represents a unit of concentration
+		typedef base_unit<length, std::ratio< 2>, mass,    std::ratio< 1>, time,    std::ratio<-2>>
+			torque_unit;                  ///< Represents an SI derived unit of torque
+		typedef base_unit<length, std::ratio< 2>>
+			area_unit;                    ///< Represents an SI derived unit of area
+		typedef base_unit<length, std::ratio< 3>>
+			volume_unit;                  ///< Represents an SI derived unit of volume
+		typedef base_unit<length, std::ratio<-3>, mass,    std::ratio< 1>>
+			density_unit;                 ///< Represents an SI derived unit of density
+		typedef base_unit<>
+			concentration_unit;           ///< Represents a unit of concentration
 	}
 
 	//------------------------------
@@ -707,14 +850,14 @@ namespace units
 	 * @brief		unit type template specialization for units derived from base units.
 	 */
 	template <class, class, class, class> struct unit;
-	template<class Conversion, class... Exponents, class PiExponent, class Translation>
-	struct unit<Conversion, base_unit<Exponents...>, PiExponent, Translation> : units::detail::_unit
+	template<class Conversion, class... Dimensions, class PiExponent, class Translation>
+	struct unit<Conversion, base_unit<Dimensions...>, PiExponent, Translation> : units::detail::_unit
 	{
 		static_assert(traits::is_ratio<Conversion>::value, "Template parameter `Conversion` must be a `std::ratio` representing the conversion factor to `BaseUnit`.");
 		static_assert(traits::is_ratio<PiExponent>::value, "Template parameter `PiExponent` must be a `std::ratio` representing the exponents of Pi the unit has.");
 		static_assert(traits::is_ratio<Translation>::value, "Template parameter `Translation` must be a `std::ratio` representing an additive translation required by the unit conversion.");
 
-		typedef typename units::base_unit<Exponents...> base_unit_type;
+		typedef typename units::base_unit<Dimensions...> base_unit_type;
 		typedef Conversion conversion_ratio;
 		typedef Translation translation_ratio;
 		typedef PiExponent pi_exponent_ratio;
@@ -768,10 +911,10 @@ namespace units
 		template<class> struct base_unit_of_impl;
 		template<class Conversion, class BaseUnit, class PiExponent, class Translation>
 		struct base_unit_of_impl<unit<Conversion, BaseUnit, PiExponent, Translation>> : base_unit_of_impl<BaseUnit> {};
-		template<class... Exponents>
-		struct base_unit_of_impl<base_unit<Exponents...>>
+		template<class... Dimensions>
+		struct base_unit_of_impl<base_unit<Dimensions...>>
 		{
-			typedef base_unit<Exponents...> type;
+			typedef base_unit<Dimensions...> type;
 		};
 		template<>
 		struct base_unit_of_impl<void>
@@ -796,15 +939,126 @@ namespace units
 	/** @cond */	// DOXYGEN IGNORE
 	namespace detail
 	{
+		// UTILITY FOR DYNAMIC DIMENSION LISTS
+		template<class Base1, class Exp1, class Dims> struct base_unit_push_front_impl {};
+		template<class BaseN, class ExpN, class Dims> struct base_unit_push_back_impl {};
+
+		template<class Base1, class Exp1, class... Dims>
+		struct base_unit_push_front_impl<Base1, Exp1, base_unit<Dims...> > { using type = base_unit<Base1, Exp1, Dims...>; };
+		template<class BaseN, class ExpN, class... Dims>
+		struct base_unit_push_back_impl <BaseN, ExpN, base_unit<Dims...> > { using type = base_unit<Dims..., BaseN, ExpN>; };
+
+		template<class Base1, class Exp1, class Dimensions>
+		using base_unit_push_front = typename base_unit_push_front_impl<Base1, Exp1, Dimensions>::type;
+		template<class BaseN, class ExpN, class Dimensions>
+		using base_unit_push_back  = typename base_unit_push_back_impl<BaseN, ExpN, Dimensions>::type;
+	
+		/**
+		 * @brief		implementation of base_unit_pow
+		 * @details		Raises a base unit to a rational power, multiplying all exponents in its dimension list.
+		 */
+		template<class U, class Power> struct base_unit_pow_impl {};
+
+		template<class Power>
+		struct base_unit_pow_impl<base_unit<>, Power> {using type = base_unit<>;};
+
+		template<class Base1, class Exp1, class... Dims, class Power>
+		struct base_unit_pow_impl<base_unit<Base1, Exp1, Dims...>, Power> {
+			using type = util::base_unit_push_front_t<
+				Base1, std::ratio_multiply<Exp1, Power>,
+				typename base_unit_pow_impl<base_unit<Dims...>, Power>::type>;
+		};
+
+		/**
+		 * @brief		represents the type of a `base_unit` raised to a power.
+		 * @details		E.g. `base_unit_pow<length_unit, 3>` will represent `length_unit^3`.
+		 */
+		template<class U, class Power>
+		using base_unit_pow = typename base_unit_pow_impl<U, Power>::type;
+		
+	#if 0
+		/**
+		 * @brief		optimized implementation of inverse_base
+		 * @details		multiplies all `base_unit` exponent ratios by -1. The resulting type represents
+		 *				the inverse base unit of the given `base_unit` type.
+		 */
+		template<class U> struct inverse_base_impl {};
+
+		template<class Power>
+		struct inverse_base_impl<base_unit<>, Power> {using type = base_unit<>;};
+
+		template<class Base1, class Exp1, class... Dims, class Power>
+		struct inverse_base_impl<base_unit<Base1, Exp1, Dims...>, Power> {
+			using type = util::base_unit_push_front_t<
+				Base1, std::ratio<-Exp1::num, Exp1::den>,
+				typename inverse_base_impl<base_unit<Dims...>, Power>::type>;
+		};
+
+		/**
+		 * @brief		represent the inverse type of `class U`
+		 * @details		E.g. if `U` is `length_unit`, then `inverse<U>` will represent `length_unit^-1`.
+		 */
+		template<class U>
+		using inverse_base = typename inverse_base_impl<U>::type;
+	#else
+		/**
+		 * @brief		represent the inverse type of `class U`
+		 * @details		E.g. if `U` is `length_unit`, then `inverse<U>` will represent `length_unit^-1`.
+		 */
+		template<class U>
+		using inverse_base = base_unit_pow<U, std::ratio<-1>>;
+	#endif
+		
 		/**
 		 * @brief		implementation of base_unit_multiply
 		 * @details		'multiples' (adds exponent ratios of) two base unit types. Base units can be found
 		 *				using `base_unit_of`.
 		 */
-		template<class, class> struct base_unit_multiply_impl;
-		template<class... Exponents1, class... Exponents2>
-		struct base_unit_multiply_impl<base_unit<Exponents1...>, base_unit<Exponents2...>> {
-			using type = base_unit<std::ratio_add<Exponents1, Exponents2>...>;
+		template<class A, class B, class Enable = void> struct base_unit_multiply_impl {};
+
+		// Case A: B is dimensionless; return A.
+		template<class... A_Rest>
+		struct base_unit_multiply_impl<base_unit<A_Rest...>, base_unit<>, void> { using type = base_unit<A_Rest...>; };
+
+		// Case B: A is dimensionless; return B (which is not).
+		template<class BBase, class BExp, class... B_Rest>
+		struct base_unit_multiply_impl<base_unit<>, base_unit<BBase, BExp, B_Rest...>, void> { using type = base_unit<BBase, BExp, B_Rest...>; };
+
+		// Case C: A's first dimension precedes B's
+		template<class ABase, class AExp, class BBase, class BExp, class... A_Rest, class... B_Rest >
+		struct base_unit_multiply_impl<base_unit<ABase, AExp, A_Rest...>, base_unit<BBase, BExp, B_Rest...>,
+			typename std::enable_if<traits::base_dimension_before<ABase, BBase>::value>::type>
+		{
+			using type = util::base_unit_push_front<ABase, AExp,
+				typename base_unit_multiply_impl<base_unit<A_Rest...>, base_unit<BBase, BExp, B_Rest...> >::type>;
+		};
+
+		// Case D: B's first dimension precedes A's
+		template<class ABase, class AExp, class BBase, class BExp, class... A_Rest, class... B_Rest>
+		struct base_unit_multiply_impl<base_unit<ABase, AExp, A_Rest...>, base_unit<BBase, BExp, B_Rest...>,
+			typename std::enable_if<traits::base_dimension_after<ABase, BBase>::value>::type>
+		{
+			using type = util::base_unit_push_front<BBase, BExp,
+				typename base_unit_multiply_impl<base_unit<ABase, AExp, A_Rest...>, base_unit<B_Rest...> >::type>;
+		};
+
+		// Case E1: A's first dimension is compatible with B's and they don't cancel out
+		template<class ABase, class AExp, class BBase, class BExp, class... A_Rest, class... B_Rest>
+		struct base_unit_multiply_impl<base_unit<ABase, AExp, A_Rest...>, base_unit<BBase, BExp, B_Rest...>,
+			typename std::enable_if<traits::base_dimension_same<ABase, BBase>::value
+				&& (std::ratio_add<AExp, BExp>::num != 0)>::type>
+		{
+			using type = util::base_unit_push_front<ABase, std::ratio_add<AExp, BExp>,
+				typename base_unit_multiply_impl<base_unit<A_Rest...>, base_unit<B_Rest...> >::type>;
+		};
+
+		// Case E2: A's first dimension is compatible with B's and they cancel out
+		template<class ABase, class AExp, class BBase, class BExp, class... A_Rest, class... B_Rest>
+		struct base_unit_multiply_impl<base_unit<ABase, AExp, A_Rest...>, base_unit<BBase, BExp, B_Rest...>,
+			typename std::enable_if<traits::base_dimension_same<ABase, BBase>::value
+				&& (std::ratio_add<AExp, BExp>::num == 0)>::type>
+		{
+			using type = typename base_unit_multiply_impl<base_unit<A_Rest...>, base_unit<B_Rest...> >::type;
 		};
 
 		/**
@@ -814,107 +1068,33 @@ namespace units
 		using base_unit_multiply = typename base_unit_multiply_impl<U1, U2>::type;
 
 		/**
-		 * @brief		implementation of base_unit_divide
-		 * @details		'dived' (subtracts exponent ratios of) two base unit types. Base units can be found
-		 *				using `base_unit_of`.
-		 */
-		template<class, class> struct base_unit_divide_impl;
-		template<class... Exponents1, class... Exponents2>
-		struct base_unit_divide_impl<base_unit<Exponents1...>, base_unit<Exponents2...>> {
-			using type = base_unit<std::ratio_subtract<Exponents1, Exponents2>...>;
-		};
-
-		/**
 		 * @brief		represents the resulting type of `base_unit` U1 divided by U2.
 		 */
-		template<class U1, class U2>
-		using base_unit_divide = typename base_unit_divide_impl<U1, U2>::type;
-
-		/**
-		 * @brief		implementation of inverse_base
-		 * @details		multiplies all `base_unit` exponent ratios by -1. The resulting type represents
-		 *				the inverse base unit of the given `base_unit` type.
-		 */
-		template<class> struct inverse_base_impl;
-
-		template<class... Exponents>
-		struct inverse_base_impl<base_unit<Exponents...>> {
-			using type = base_unit<std::ratio_multiply<Exponents, std::ratio<-1>>...>;
-		};
-
-		/**
-		 * @brief		represent the inverse type of `class U`
-		 * @details		E.g. if `U` is `length_unit`, then `inverse<U>` will represent `length_unit^-1`.
-		 */
-		template<class U> using inverse_base = typename inverse_base_impl<U>::type;
-
-		/**
-		 * @brief		implementation of `squared_base`
-		 * @details		multiplies all the exponent ratios of the given class by 2. The resulting type is
-		 *				equivalent to the given type squared.
-		 */
-		template<class U> struct squared_base_impl;
-		template<class... Exponents>
-		struct squared_base_impl<base_unit<Exponents...>> {
-			using type = base_unit<std::ratio_multiply<Exponents, std::ratio<2>>...>;
-		};
+		using base_unit_divide = typename base_unit_multiply_impl<U1, inverse_base<U2> >::type;
 
 		/**
 		 * @brief		represents the type of a `base_unit` squared.
 		 * @details		E.g. `squared<length_unit>` will represent `length_unit^2`.
 		 */
-		template<class U> using squared_base = typename squared_base_impl<U>::type;
-
-		/**
-		 * @brief		implementation of `cubed_base`
-		 * @details		multiplies all the exponent ratios of the given class by 3. The resulting type is
-		 *				equivalent to the given type cubed.
-		 */
-		template<class U> struct cubed_base_impl;
-		template<class... Exponents>
-		struct cubed_base_impl<base_unit<Exponents...>> {
-			using type = base_unit<std::ratio_multiply<Exponents, std::ratio<3>>...>;
-		};
+		template<class U> using squared_base = typename base_unit_pow_impl<U, std::ratio<2>>::type;
 
 		/**
 		 * @brief		represents the type of a `base_unit` cubed.
 		 * @details		E.g. `cubed<length_unit>` will represent `length_unit^3`.
 		 */
-		template<class U> using cubed_base = typename cubed_base_impl<U>::type;
-
-		/**
-		 * @brief		implementation of `sqrt_base`
-		 * @details		divides all the exponent ratios of the given class by 2. The resulting type is
-		 *				equivalent to the square root of the given type.
-		 */
-		template<class U> struct sqrt_base_impl;
-		template<class... Exponents>
-		struct sqrt_base_impl<base_unit<Exponents...>> {
-			using type = base_unit<std::ratio_divide<Exponents, std::ratio<2>>...>;
-		};
+		template<class U> using cubed_base = typename base_unit_pow_impl<U, std::ratio<3>>::type;
 
 		/**
 		 * @brief		represents the square-root type of a `base_unit`.
 		 * @details		E.g. `sqrt<length_unit>` will represent `length_unit^(1/2)`.
 		 */
-		template<class U> using sqrt_base = typename sqrt_base_impl<U>::type;
-
-		/**
-		 * @brief		implementation of `cbrt_base`
-		 * @details		divides all the exponent ratios of the given class by 3. The resulting type is
-		 *				equivalent to the given type's cube-root.
-		 */
-		template<class U> struct cbrt_base_impl;
-		template<class... Exponents>
-		struct cbrt_base_impl<base_unit<Exponents...>> {
-			using type = base_unit<std::ratio_multiply<Exponents, std::ratio<3>>...>;
-		};
+		template<class U> using sqrt_base = typename base_unit_pow_impl<U, std::ratio<1,2>>::type;
 
 		/**
 		 * @brief		represents the cube-root type of a `base_unit` .
 		 * @details		E.g. `cbrt<length_unit>` will represent `length_unit^(1/3)`.
 		 */
-		template<class U> using cbrt_base = typename cbrt_base_impl<U>::type;
+		template<class U> using cbrt_base = typename base_unit_pow_impl<U, std::ratio<1,3>>::type;
 	}
 	/** @endcond */	// END DOXYGEN IGNORE
 
