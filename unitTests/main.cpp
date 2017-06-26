@@ -158,6 +158,30 @@ TEST_F(TypeTraits, ratio_sqrt)
 	EXPECT_LT(std::abs(std::sqrt(10000 / (double)1) - rt10000::num / (double)rt10000::den), 5e-9);
 }
 
+TEST_F(TypeTraits, is_base_dimension)
+{
+	EXPECT_TRUE(traits::is_base_dimension<units::d::length>::value);
+	EXPECT_TRUE(traits::is_base_dimension<units::d::angle>::value);
+	EXPECT_FALSE(traits::is_base_dimension<void>::value);
+	EXPECT_FALSE(traits::is_base_dimension<std::ratio<1>>::value);
+}
+
+TEST_F(TypeTraits, dimensions_ordered)
+{
+	EXPECT_TRUE(traits::dimensions_ordered<>::value);
+	EXPECT_TRUE((traits::dimensions_ordered<units::d::length, std::ratio<1>, units::d::time, std::ratio<-1>>::value));
+	EXPECT_FALSE((traits::dimensions_ordered<units::d::time, std::ratio<1>, units::d::length, std::ratio<-1>>::value));
+	EXPECT_FALSE((traits::dimensions_ordered<units::d::length, std::ratio<1>, units::d::length, std::ratio<-1>>::value));
+}
+
+TEST_F(TypeTraits, dimensions_valid_exponents)
+{
+	EXPECT_TRUE(traits::dimensions_valid_exponents<>::value);
+	EXPECT_TRUE((traits::dimensions_valid_exponents<units::d::length, std::ratio<1>>::value));
+	EXPECT_FALSE((traits::dimensions_valid_exponents<units::d::length, std::ratio<0>>::value));
+	EXPECT_FALSE((traits::dimensions_valid_exponents<units::d::length>::value));
+}
+
 TEST_F(TypeTraits, is_unit)
 {
 	EXPECT_FALSE(traits::is_unit<std::ratio<1>>::value);
