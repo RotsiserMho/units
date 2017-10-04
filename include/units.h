@@ -727,6 +727,40 @@ namespace units
 		struct dimensions_valid_exponents<Base1, Exp1, Dims...> :
 			public std::integral_constant<bool,
 				traits::is_ratio<Exp1>::value && (Exp1::num != 0) && dimensions_valid_exponents<Dims...>::value> {};
+
+		/**
+		 * @brief        Look up a dimension in a variadic list.
+		 * @details      Searches the variadic dimension list for a dimension and provides information about it.
+		 */
+		template<class SearchDim, class... Dims> struct dimension_find {};
+
+		template<class SearchDim>
+		struct dimension_find<SearchDim>
+		{
+			using exponent = std::ratio<0, 1>;
+			using found = std::integral_constant<bool, false>;
+		};
+
+		template<class SearchDim, class Exp, class... OtherDims>
+		struct dimension_find<SearchDim, SearchDim, Exp, OtherDims...>
+		{
+			using exponent = Exp;
+			using found = std::integral_constant<bool, true>;
+		};
+		
+		template<class SearchDim, class Dim, class Exp, class... OtherDims>
+		struct dimension_find<SearchDim, Dim, Exp, OtherDims...>
+		{
+			using _sub_search = dimension_find<SearchDim, OtherDims...>;
+			using exponent = typename _sub_search::exponent;
+			using found = typename _sub_search::found;
+		};
+
+		template<class SearchDim, class... Dims>
+		using dimension_exponent = typename dimension_find<SearchDim, Dims...>::exponent;
+
+		template<class SearchDim, class... Dims>
+		using dimension_in_list = typename dimension_find<SearchDim, Dims...>::found;
 	}
 
 	/** @cond */	// DOXYGEN IGNORE
@@ -795,7 +829,7 @@ namespace units
 
 	// Useful non-SI base dimensions
 	UNIT_ADD_BASE_DIMENSION(d, 10100, angle,      "Rad", "rad")
-	UNIT_ADD_BASE_DIMENSION(d, 10200, dataLength, "Bit", "bit")
+	UNIT_ADD_BASE_DIMENSION(d, 10200, data_length, "Bit", "bit")
 	
 	//------------------------------
 	//	BASE UNIT CLASS
@@ -819,6 +853,17 @@ namespace units
 			"Template parameter dimensions must be declared in order of their unique_id.");
 		static_assert(traits::dimensions_valid_exponents<Dimensions...>::value,
 			"Template parameter dimensions must be followed by non-zero `std::ratio` exponents representing the exponent of that dimension.");
+
+		// For compatibility with nholthaus units 2.3.x
+		using meter_ratio = traits::dimension_exponent<d::length, Dimensions...>;
+		using kilogram_ratio = traits::dimension_exponent<d::mass, Dimensions...>;
+		using second_ratio = traits::dimension_exponent<d::time, Dimensions...>;
+		using radian_ratio = traits::dimension_exponent<d::angle, Dimensions...>;
+		using ampere_ratio = traits::dimension_exponent<d::current, Dimensions...>;
+		using kelvin_ratio = traits::dimension_exponent<d::temperature, Dimensions...>;
+		using mole_ratio = traits::dimension_exponent<d::substance, Dimensions...>;
+		using candela_ratio = traits::dimension_exponent<d::luminous_intensity, Dimensions...>;
+		using byte_ratio = traits::dimension_exponent<d::data_length, Dimensions...>;
 	};
 
 	//------------------------------
@@ -900,9 +945,9 @@ namespace units
 			density_unit;                 ///< Represents an SI derived unit of density
 		typedef base_unit<>
 			concentration_unit;           ///< Represents a unit of concentration
-		typedef base_unit<d::dataLength, std::ratio<1>>
+		typedef base_unit<d::data_length, std::ratio<1>>
 			data_unit;                    ///< Represents a unit of data size
-		typedef base_unit<d::time,	     std::ratio<-1>,	d::dataLength,	std::ratio<1>>
+		typedef base_unit<d::time,        std::ratio<-1>, d::data_length, std::ratio<1>>
 			data_transfer_rate_unit;      ///< Represents a unit of data transfer rate
 	}
 
@@ -2353,51 +2398,6 @@ namespace units
 		os << convert<Units, BaseUnits>(obj());
 		
 		detail::dimensions_print(os, BaseDimensions());
-
-		/*if (traits::unit_traits<Units>::base_unit_type::meter_ratio::num != 0) { os << " m"; }
-		if (traits::unit_traits<Units>::base_unit_type::meter_ratio::num != 0 && 
-			traits::unit_traits<Units>::base_unit_type::meter_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::meter_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::meter_ratio::den != 1) { os << "/"   << traits::unit_traits<Units>::base_unit_type::meter_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::kilogram_ratio::num != 0) { os << " kg"; }
-		if (traits::unit_traits<Units>::base_unit_type::kilogram_ratio::num != 0 &&
-			traits::unit_traits<Units>::base_unit_type::kilogram_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::kilogram_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::kilogram_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::kilogram_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::second_ratio::num != 0) { os << " s"; }
-		if (traits::unit_traits<Units>::base_unit_type::second_ratio::num != 0 &&
-			traits::unit_traits<Units>::base_unit_type::second_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::second_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::second_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::second_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::ampere_ratio::num != 0) { os << " A"; }
-		if (traits::unit_traits<Units>::base_unit_type::ampere_ratio::num != 0 &&
-			traits::unit_traits<Units>::base_unit_type::ampere_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::ampere_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::ampere_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::ampere_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::kelvin_ratio::num != 0) { os << " K"; }
-		if (traits::unit_traits<Units>::base_unit_type::kelvin_ratio::num != 0 &&
-			traits::unit_traits<Units>::base_unit_type::kelvin_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::kelvin_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::kelvin_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::kelvin_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::mole_ratio::num != 0) { os << " mol"; }
-		if (traits::unit_traits<Units>::base_unit_type::mole_ratio::num != 0 && 
-			traits::unit_traits<Units>::base_unit_type::mole_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::mole_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::mole_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::mole_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::candela_ratio::num != 0) { os << " cd"; }
-		if (traits::unit_traits<Units>::base_unit_type::candela_ratio::num != 0 &&
-			traits::unit_traits<Units>::base_unit_type::candela_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::candela_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::candela_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::candela_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::radian_ratio::num != 0) { os << " rad"; }
-		if (traits::unit_traits<Units>::base_unit_type::radian_ratio::num != 0 &&
-			traits::unit_traits<Units>::base_unit_type::radian_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::radian_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::radian_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::radian_ratio::den; }
-
-		if (traits::unit_traits<Units>::base_unit_type::byte_ratio::num != 0) { os << " b"; }
-		if (traits::unit_traits<Units>::base_unit_type::byte_ratio::num != 0 &&
-			traits::unit_traits<Units>::base_unit_type::byte_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::byte_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::byte_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::byte_ratio::den; }*/
 
 		return os;
 	}
