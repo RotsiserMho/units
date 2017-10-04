@@ -403,19 +403,21 @@ namespace units
  * @param		namespaceName - namespace in which the new base dimension will be declared.
  * @param		uniqueId - unique integer ID which controls the sorting order of base dimensions.
  * @param		dimensionName - name of the physical dimension, e.g. 'length'
- * @param		dimensionSymbol - string symbol for the physical dimension, e.g. "L"
+ * @param		dimensionSymbol - string symbol for the physical dimension, e.g. 'L'
+ * @param		baseUnitSymbol - string symbol for the base physical unit, e.g. 'M'
  * @note        A canonical ordering is a necessary compromise for sparse, extensible dimension lists.
  *              If a future C++ spec provides a compile-time function similar to std::type_info::before,
  *              the "uniqueId" value may become unnecessary.
  */
-#define UNIT_ADD_BASE_DIMENSION(namespaceName, uniqueId, dimensionName, dimensionSymbol) \
+#define UNIT_ADD_BASE_DIMENSION(namespaceName, uniqueId, dimensionName, dimensionSymbol, dimensionBaseUnitSymbol) \
 	namespace namespaceName \
 	{\
 		struct dimensionName : public units::detail::_base_dimension_t \
 		{\
 			static const int unique_id = (uniqueId); \
-			static const char* name() {return #dimensionName;} \
-			static const char* symbol() {return #dimensionSymbol;} \
+			static const char* Name() {return ( #dimensionName );} \
+			static const char* Symbol() {return (dimensionSymbol);} \
+			static const char* BaseUnitSymbol() {return (dimensionBaseUnitSymbol);} \
 		};\
 	}
 
@@ -783,17 +785,17 @@ namespace units
 	//------------------------------
 
 	// SI standard base physical dimensions
-	UNIT_ADD_BASE_DIMENSION(d, 100, length,             "L");
-	UNIT_ADD_BASE_DIMENSION(d, 200, mass,               "M");
-	UNIT_ADD_BASE_DIMENSION(d, 300, time,               "T");
-	UNIT_ADD_BASE_DIMENSION(d, 400, current,            "I");
-	UNIT_ADD_BASE_DIMENSION(d, 500, temperature,        "K"); // SI symbol is uppercase Theta...
-	UNIT_ADD_BASE_DIMENSION(d, 600, substance,          "N");
-	UNIT_ADD_BASE_DIMENSION(d, 700, luminous_intensity, "J");
+	UNIT_ADD_BASE_DIMENSION(d, 100, length,             "L", "m")
+	UNIT_ADD_BASE_DIMENSION(d, 200, mass,               "M", "kg")
+	UNIT_ADD_BASE_DIMENSION(d, 300, time,               "T", "s")
+	UNIT_ADD_BASE_DIMENSION(d, 400, current,            "I", "A")
+	UNIT_ADD_BASE_DIMENSION(d, 500, temperature,        "K", "K") // Proper SI symbol is uppercase Theta...
+	UNIT_ADD_BASE_DIMENSION(d, 600, substance,          "N", "mol")
+	UNIT_ADD_BASE_DIMENSION(d, 700, luminous_intensity, "J", "cd")
 
 	// Useful non-SI base dimensions
-	UNIT_ADD_BASE_DIMENSION(d, 10100, angle,      "Rad");
-	UNIT_ADD_BASE_DIMENSION(d, 10200, dataLength, "Bit");
+	UNIT_ADD_BASE_DIMENSION(d, 10100, angle,      "Rad", "rad")
+	UNIT_ADD_BASE_DIMENSION(d, 10200, dataLength, "Bit", "bit")
 	
 	//------------------------------
 	//	BASE UNIT CLASS
@@ -2305,13 +2307,54 @@ namespace units
 	}
 
 #if !defined(UNIT_LIB_DISABLE_IOSTREAM)
+	namespace detail
+	{
+		/**
+		 * @ingroup		IoStream
+		 * @brief		Function to print the base units of a dimension
+		 * @details		Prints the dimension's BaseUnitSymbol() property.
+		 */
+		template<class BaseDimension>
+		static std::ostream &dimension_print(std::ostream& os, const BaseDimension &dim)
+		{
+			os << ' ' << BaseDimension::BaseUnitSymbol();
+			return os;
+		}
+		
+		template<std::intmax_t N, std::intmax_t D>
+		static std::ostream &dimension_print(std::ostream& os, const std::ratio<N, D> &ratio)
+		{
+			if (N != 0 && (N != 1 || D != 1))
+			{
+				os << '^' << N;
+				if (D != 1) os << '/' << D;
+			}
+			return os;
+		}
+		
+		/**
+		 * @ingroup		IoStream
+		 * @brief		Function to print the base units of a dimension list
+		 * @details		Prints the dimensions' BaseUnitSymbol() properties, in ID order.
+		 */
+		template<class... Dims>
+		static std::ostream &dimensions_print(std::ostream& os, const base_unit<Dims...> &dims)
+		{
+			int i[] = { (dimension_print(os, Dims()), 0)... };
+			return os;
+		}
+	}
+
 	template<class Units, typename T, template<typename> class NonLinearScale>
 	inline std::ostream& operator<<(std::ostream& os, const unit_t<Units, T, NonLinearScale>& obj) noexcept
 	{
-		using BaseUnits = unit<std::ratio<1>, typename traits::unit_traits<Units>::base_unit_type>;
+		using BaseDimensions = typename traits::unit_traits<Units>::base_unit_type;
+		using BaseUnits = unit<std::ratio<1>, BaseDimensions>;
 		os << convert<Units, BaseUnits>(obj());
+		
+		detail::dimensions_print(os, BaseDimensions());
 
-		if (traits::unit_traits<Units>::base_unit_type::meter_ratio::num != 0) { os << " m"; }
+		/*if (traits::unit_traits<Units>::base_unit_type::meter_ratio::num != 0) { os << " m"; }
 		if (traits::unit_traits<Units>::base_unit_type::meter_ratio::num != 0 && 
 			traits::unit_traits<Units>::base_unit_type::meter_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::meter_ratio::num; }
 		if (traits::unit_traits<Units>::base_unit_type::meter_ratio::den != 1) { os << "/"   << traits::unit_traits<Units>::base_unit_type::meter_ratio::den; }
@@ -2354,7 +2397,7 @@ namespace units
 		if (traits::unit_traits<Units>::base_unit_type::byte_ratio::num != 0) { os << " b"; }
 		if (traits::unit_traits<Units>::base_unit_type::byte_ratio::num != 0 &&
 			traits::unit_traits<Units>::base_unit_type::byte_ratio::num != 1) { os << "^" << traits::unit_traits<Units>::base_unit_type::byte_ratio::num; }
-		if (traits::unit_traits<Units>::base_unit_type::byte_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::byte_ratio::den; }
+		if (traits::unit_traits<Units>::base_unit_type::byte_ratio::den != 1) { os << "/" << traits::unit_traits<Units>::base_unit_type::byte_ratio::den; }*/
 
 		return os;
 	}
